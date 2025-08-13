@@ -19,7 +19,7 @@ import argparse
 import os
 import re
 
-import datasets
+from datasets import Dataset
 
 from verl.utils.hdfs_io import copy, makedirs
 
@@ -30,21 +30,24 @@ def extract_solution(solution_str):
     final_solution = solution.group(0)
     final_solution = final_solution.split("#### ")[1].replace(",", "")
     return final_solution
-
+ 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_dir", default="~/data/gsm8k")
     parser.add_argument("--hdfs_dir", default=None)
+    parser.add_argument("--dataset_dir", default="/home/jiaqizheng/DATA/gsm8k")  # 增加一个参数指向本地数据集目录
 
     args = parser.parse_args()
 
     data_source = "openai/gsm8k"
 
-    dataset = datasets.load_dataset(data_source, "main")
-
-    train_dataset = dataset["train"]
-    test_dataset = dataset["test"]
+    # dataset = datasets.load_dataset(data_source, "main") # 加载hugging face的数据集
+    # dataset = datasets.load_from_disk(args.dataset_dir) # 更改为hugging face缓存好的本地数据集
+    # train_dataset = dataset["train"]
+    # test_dataset = dataset["test"]
+    train_dataset = Dataset.from_file(os.path.join(args.dataset_dir, "train.arrow"))
+    test_dataset = Dataset.from_file(os.path.join(args.dataset_dir, "test.arrow"))
 
     instruction_following = 'Let\'s think step by step and output the final answer after "####".'
 

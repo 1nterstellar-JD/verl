@@ -127,7 +127,26 @@ def compute_reward(data: DataProto, reward_fn):
         reward_extra_infos_dict = {}
 
     return reward_tensor, reward_extra_infos_dict
+def my_compute_reward(data: DataProto, reward_fn, cur_step: int, total_step: int):
+    """
+    计算一个 batch 数据的奖励值。
+    参数:
+        data: 包含输入数据的 DataProto 对象。
+        reward_fn: 用于计算奖励的函数。
+        cur_step: 当前的训练步数（step）。
+    返回:
+        奖励张量（reward tensor）和额外信息字典（extra info dictionary）的元组。
+    """
+    try:
+        reward_result = reward_fn(data, cur_step=cur_step, total_step=total_step, return_dict=True)
+        reward_tensor = reward_result["reward_tensor"]
+        reward_extra_infos_dict = reward_result["reward_extra_info"]
+    except Exception as e:
+        print(f"Error in reward_fn: {e}")
+        reward_tensor = reward_fn(data)
+        reward_extra_infos_dict = {}
 
+    return reward_tensor, reward_extra_infos_dict
 
 @ray.remote(num_cpus=1)
 def compute_reward_async(data: DataProto, config, tokenizer):

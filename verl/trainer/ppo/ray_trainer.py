@@ -49,7 +49,7 @@ from verl.trainer.ppo.metric_utils import (
     compute_timing_metrics,
     process_validation_metrics,
 )
-from verl.trainer.ppo.reward import compute_reward, compute_reward_async
+from verl.trainer.ppo.reward import compute_reward, my_compute_reward, compute_reward_async
 from verl.utils.checkpoint.checkpoint_manager import BaseCheckpointManager, find_latest_ckpt_path
 from verl.utils.debug.performance import _timer
 from verl.utils.metric import (
@@ -484,10 +484,10 @@ class RayPPOTrainer:
             from verl.utils.dataset.rl_dataset import collate_fn as default_collate_fn
 
             collate_fn = default_collate_fn
-
+        # StatefulDataLoader内部实现了 __len__()方法, 返回的是 **能从dataset中取出多少个batch**
         self.train_dataloader = StatefulDataLoader(
-            dataset=self.train_dataset,
-            batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size),
+            dataset=self.train_dataset, # 数据集, 内部自行实现样本量统计 
+            batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size), # 用户设置的 batch_size
             num_workers=self.config.data.get("dataloader_num_workers", 8),
             drop_last=True,
             collate_fn=collate_fn,
@@ -511,7 +511,7 @@ class RayPPOTrainer:
         assert len(self.val_dataloader) >= 1, "Validation dataloader is empty!"
 
         print(f"Size of train dataloader: {len(self.train_dataloader)}, Size of val dataloader: {len(self.val_dataloader)}")
-
+        # 总训练步数: 计算 “每个 epoch 有多少 batch（step）”，再乘上总 epoch 数
         total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
 
         if self.config.trainer.total_training_steps is not None:
@@ -910,12 +910,12 @@ class RayPPOTrainer:
         # add tqdm
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
 
-        # we start from step 1
+        # we start from step 1 在训练主循环里每完成一次 mini-batch 的完整处理（包括生成、reward、advantage、更新、日志等步骤）时就会递增一次。
         self.global_steps += 1
         last_val_metrics = None
 
         for epoch in range(self.config.trainer.total_epochs):
-            for batch_dict in self.train_dataloader:
+            for batch_dict in self.train_dataloader: # 每 batch_size 作为一次完整的训练step
                 metrics = {}
                 timing_raw = {}
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
@@ -987,10 +987,12 @@ class RayPPOTrainer:
                             reward_tensor = self.rm_wg.compute_rm_score(batch)
                             batch = batch.union(reward_tensor)
 
-                        if self.config.reward_model.launch_reward_fn_async:
+                        # reward_fn 在 main_ppo.py 中定义
+                        if self.config.reward_model.launch_reward_fn_async: # 默认为 False
                             future_reward = compute_reward_async.remote(batch, self.config, self.tokenizer)
                         else:
-                            reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn)
+                            # reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn)
+                            reward_tensor, reward_extra_infos_dict = my_compute_reward(batch, self.reward_fn, cur_step=self.global_steps, total_step=self.total_training_steps)
 
                     # recompute old_log_probs
                     with _timer("old_log_prob", timing_raw):
